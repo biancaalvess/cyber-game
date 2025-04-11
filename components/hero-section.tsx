@@ -20,8 +20,23 @@ interface HeroSectionProps {
 
 export default function HeroSection({ startGame, difficulty, setDifficulty, score, bestScore }: HeroSectionProps) {
   const [glitchText, setGlitchText] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
+  const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number; opacity: number }>>([])
 
   useEffect(() => {
+    setIsMounted(true)
+
+    // Generate particles with stable positions
+    const newParticles = Array.from({ length: 20 }).map((_, i) => {
+      // Use index to create deterministic positions
+      const x = (i * 50) % (typeof window !== "undefined" ? window.innerWidth : 1000)
+      const y = ((i * 70) % (typeof window !== "undefined" ? window.innerHeight : 800)) + 100
+
+      return { id: i, x, y, opacity: 0.3 + (i % 7) / 10 }
+    })
+
+    setParticles(newParticles)
+
     const interval = setInterval(() => {
       setGlitchText(true)
       setTimeout(() => setGlitchText(false), 200)
@@ -30,27 +45,32 @@ export default function HeroSection({ startGame, difficulty, setDifficulty, scor
     return () => clearInterval(interval)
   }, [])
 
+  // Don't render until client-side hydration is complete
+  if (!isMounted) {
+    return null
+  }
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[90vh] relative">
       <div className="absolute top-0 right-0 left-0 h-40 bg-gradient-to-b from-purple-600/10 to-transparent"></div>
       <div className="absolute bottom-0 right-0 left-0 h-40 bg-gradient-to-t from-blue-600/10 to-transparent"></div>
 
       {/* Floating particles */}
-      {Array.from({ length: 20 }).map((_, i) => (
+      {particles.map((particle) => (
         <motion.div
-          key={i}
+          key={particle.id}
           className="absolute w-1 h-1 rounded-full bg-purple-500/70"
           initial={{
-            x: Math.random() * window.innerWidth,
-            y: Math.random() * window.innerHeight,
-            opacity: Math.random() * 0.5 + 0.3,
+            x: particle.x,
+            y: particle.y,
+            opacity: particle.opacity,
           }}
           animate={{
-            y: [null, Math.random() * -100, Math.random() * 100],
-            x: [null, Math.random() * -100, Math.random() * 100],
+            y: [null, particle.y - 100, particle.y + 100],
+            x: [null, particle.x - 100, particle.x + 100],
           }}
           transition={{
-            duration: Math.random() * 10 + 10,
+            duration: 10 + (particle.id % 10),
             repeat: Number.POSITIVE_INFINITY,
             repeatType: "reverse",
           }}
@@ -71,13 +91,12 @@ export default function HeroSection({ startGame, difficulty, setDifficulty, scor
           )}
         >
           <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-cyan-300 to-blue-400">
-            CYBER MEMORY
+            SPACE SHOOTER
           </span>
         </h1>
         <div className="w-full h-px bg-gradient-to-r from-transparent via-purple-500 to-transparent my-6"></div>
         <p className="text-gray-300 text-lg max-w-2xl">
-          Teste sua memória neste desafio cyberpunk. Combine os cartões e desbloqueie sua pontuação máxima em um mundo
-          de neon e tecnologia.
+          Pilote sua nave espacial e destrua os inimigos neste clássico jogo de tiro espacial inspirado nos anos 90.
         </p>
       </motion.div>
 
@@ -90,19 +109,19 @@ export default function HeroSection({ startGame, difficulty, setDifficulty, scor
               <ul className="space-y-2 text-gray-300">
                 <li className="flex items-start">
                   <span className="mr-2 text-purple-400">1.</span>
-                  <span>Clique em um cartão para virá-lo</span>
+                  <span>Use as setas para mover sua nave</span>
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2 text-purple-400">2.</span>
-                  <span>Tente encontrar o par correspondente</span>
+                  <span>Pressione espaço para atirar</span>
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2 text-purple-400">3.</span>
-                  <span>Combine todos os cartões para completar o nível</span>
+                  <span>Destrua os inimigos para ganhar pontos</span>
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2 text-purple-400">4.</span>
-                  <span>Quanto menos tentativas, maior sua pontuação</span>
+                  <span>Evite colisões com os inimigos</span>
                 </li>
               </ul>
             </div>
@@ -183,4 +202,3 @@ export default function HeroSection({ startGame, difficulty, setDifficulty, scor
     </div>
   )
 }
-

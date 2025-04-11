@@ -3,11 +3,10 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { motion } from "framer-motion"
-import { Tilt_Neon } from 'next/font/google'
+import { Tilt_Neon } from "next/font/google"
 import { Button } from "@/components/ui/button"
-import { Zap, Volume2, VolumeX, Shield, Rocket, Target, Sparkles, BarChart3 } from 'lucide-react'
-import Image from "next/image"
+import { Volume2, VolumeX, Rocket, Shield, Zap, Target, Sparkles, BarChart3 } from "lucide-react"
+import { motion } from "framer-motion"
 
 const tiltNeon = Tilt_Neon({ subsets: ["latin"] })
 
@@ -56,6 +55,9 @@ type Particle = {
 }
 
 export default function Home() {
+  // Client-side only flag to prevent hydration issues
+  const [isMounted, setIsMounted] = useState(false)
+
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const gameLoopRef = useRef<number | null>(null)
@@ -72,6 +74,8 @@ export default function Home() {
   const [highScore, setHighScore] = useState(0)
   const [level, setLevel] = useState(1)
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
+  const [bestScore, setBestScore] = useState(0)
 
   // Estado do jogador
   const [playerX, setPlayerX] = useState(0)
@@ -109,8 +113,241 @@ export default function Home() {
   const RAPID_FIRE_COOLDOWN = 150 // ms
   const POWERUP_DURATION = 8000 // ms
 
+  // Funções do jogo
+  const handleShoot = () => {
+    if (!gameStarted || gamePaused || gameOver) return
+
+    const now = Date.now()
+    if (now - lastShootTimeRef.current < (rapidFire ? RAPID_FIRE_COOLDOWN : SHOOT_COOLDOWN)) {
+      return
+    }
+
+    lastShootTimeRef.current = now
+
+    const bulletX = playerX + PLAYER_WIDTH / 2 - BULLET_WIDTH / 2
+    const bulletY = playerY
+
+    const createBullet = (xOffset = 0) => ({
+      id: Date.now() + Math.random(),
+      x: bulletX + xOffset,
+      y: bulletY,
+      width: BULLET_WIDTH,
+      height: BULLET_HEIGHT,
+      speed: BULLET_SPEED,
+    })
+
+    let newBullets: Bullet[] = []
+
+    if (multiShot) {
+      newBullets = [createBullet(-10), createBullet(), createBullet(10)]
+    } else {
+      newBullets = [createBullet()]
+    }
+
+    setBullets((prev) => [...prev, ...newBullets])
+    playSound("shoot")
+  }
+
+  const playSound = (type: "shoot" | "hit" | "explosion" | "powerup" | "start" | "gameOver" | "levelUp") => {
+    if (!soundEnabled || !isMounted) return
+
+    try {
+      // Implementação básica de efeitos sonoros usando Web Audio API
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      switch (type) {
+        case "shoot":
+          oscillator.type = "square"
+          oscillator.frequency.setValueAtTime(440, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 0.2)
+          break
+        case "hit":
+          oscillator.type = "sawtooth"
+          oscillator.frequency.setValueAtTime(200, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(50, audioContext.currentTime + 0.1)
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 0.1)
+          break
+        case "explosion":
+          oscillator.type = "sawtooth"
+          oscillator.frequency.setValueAtTime(100, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
+          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 0.5)
+          break
+        case "powerup":
+          oscillator.type = "sine"
+          oscillator.frequency.setValueAtTime(300, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.2)
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 0.3)
+          break
+        case "start":
+          oscillator.type = "sine"
+          oscillator.frequency.setValueAtTime(300, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.5)
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.6)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 0.6)
+          break
+        case "gameOver":
+          oscillator.type = "sawtooth"
+          oscillator.frequency.setValueAtTime(200, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(50, audioContext.currentTime + 1)
+          gainNode.gain.setValueAtTime(0.2, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 1)
+          break
+        case "levelUp":
+          oscillator.type = "sine"
+          oscillator.frequency.setValueAtTime(400, audioContext.currentTime)
+          oscillator.frequency.exponentialRampToValueAtTime(800, audioContext.currentTime + 0.2)
+          oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.4)
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4)
+          oscillator.start()
+          oscillator.stop(audioContext.currentTime + 0.4)
+          break
+      }
+    } catch (error) {
+      console.error("Error playing sound:", error)
+    }
+  }
+
+  const endGame = () => {
+    setGameStarted(false)
+    setGameOver(true)
+    setGamePaused(false)
+
+    // Play game over sound
+    playSound("gameOver")
+
+    // Save best score
+    if (score > bestScore) {
+      setBestScore(score)
+      localStorage.setItem("space-shooter-best-score", score.toString())
+    }
+
+    // Reset game state
+    setEnemies([])
+    setBullets([])
+    setPowerups([])
+    setParticles([])
+    setPlayerHealth(100)
+    setPlayerShield(0)
+    setRapidFire(false)
+    setMultiShot(false)
+    setLevel(1)
+    setScore(0)
+  }
+
+  const pauseGame = () => {
+    setGamePaused((prev) => !prev)
+  }
+
+  const startGame = () => {
+    setGameStarted(true)
+    setGameOver(false)
+    setGamePaused(false)
+    setPlayerHealth(100)
+    setScore(0)
+    setEnemies([])
+    setBullets([])
+    setPowerups([])
+    setParticles([])
+
+    // Play start sound
+    playSound("start")
+  }
+
+  // Handlers de eventos
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!gameStarted || gamePaused || gameOver) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    setPlayerX(x - PLAYER_WIDTH / 2)
+  }
+
+  const handleClick = () => {
+    if (!isTouchDevice) {
+      handleShoot()
+    }
+  }
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!gameStarted || gamePaused || gameOver) return
+
+    const touch = e.touches[0]
+    if (!touch) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = touch.clientX - rect.left
+
+    setTouchStartX(x)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!gameStarted || gamePaused || gameOver) return
+
+    const touch = e.touches[0]
+    if (!touch) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = touch.clientX - rect.left
+
+    if (touchStartX !== null) {
+      const deltaX = x - touchStartX
+      setPlayerX((prevX) => Math.max(0, Math.min(prevX + deltaX, gameWidth - PLAYER_WIDTH)))
+      setTouchStartX(x)
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setTouchStartX(null)
+  }
+
+  // Set isMounted to true after initial render to avoid hydration issues
+  useEffect(() => {
+    setIsMounted(true)
+
+    // Load best score from localStorage
+    const savedBestScore = localStorage.getItem("space-shooter-best-score")
+    if (savedBestScore) {
+      setBestScore(Number.parseInt(savedBestScore, 10))
+    }
+  }, [])
+
   // Inicialização do jogo
   useEffect(() => {
+    if (!isMounted) return
+
     // Carregar high score do localStorage
     const savedHighScore = localStorage.getItem("cyberpunk-shooter-highscore")
     if (savedHighScore) {
@@ -132,7 +369,7 @@ export default function Home() {
           const isLandscape = aspectRatio > 1
 
           const gameW = width
-          let gameH = isMobile && isLandscape ? window.innerHeight * 0.7 : height
+          const gameH = isMobile && isLandscape ? window.innerHeight * 0.7 : height
 
           setGameWidth(gameW)
           setGameHeight(gameH)
@@ -155,10 +392,12 @@ export default function Home() {
         cancelAnimationFrame(gameLoopRef.current)
       }
     }
-  }, [])
+  }, [isMounted])
 
   // Adicionar esta função para detectar dispositivos touch após o useEffect de inicialização
   useEffect(() => {
+    if (!isMounted) return
+
     // Detectar se é um dispositivo touch
     const detectTouchDevice = () => {
       setIsTouchDevice("ontouchstart" in window || navigator.maxTouchPoints > 0)
@@ -181,114 +420,134 @@ export default function Home() {
         clearInterval(autoShootIntervalRef.current)
       }
     }
-  }, [gameStarted, gamePaused, gameOver, autoShoot, rapidFire])
+  }, [gameStarted, gamePaused, gameOver, autoShoot, rapidFire, isMounted])
 
   // Atualizar high score quando o score mudar
   useEffect(() => {
+    if (!isMounted) return
+
     if (score > highScore) {
       setHighScore(score)
       localStorage.setItem("cyberpunk-shooter-highscore", score.toString())
     }
-  }, [score, highScore])
+  }, [score, highScore, isMounted])
 
   // Controle de nível baseado na pontuação
   useEffect(() => {
+    if (!isMounted) return
+
     const newLevel = Math.floor(score / 1000) + 1
     if (newLevel !== level) {
       setLevel(newLevel)
       createParticles(gameWidth / 2, gameHeight / 2, 30, ["#9333ea", "#3b82f6", "#06b6d4"])
       playSound("levelUp")
     }
-  }, [score, level, gameWidth, gameHeight])
+  }, [score, level, gameWidth, gameHeight, isMounted])
 
   // Efeitos de powerup
   useEffect(() => {
+    if (!isMounted) return
+
     if (rapidFire) {
       const timer = setTimeout(() => {
         setRapidFire(false)
       }, POWERUP_DURATION)
       return () => clearTimeout(timer)
     }
-  }, [rapidFire])
+  }, [rapidFire, isMounted])
 
   useEffect(() => {
+    if (!isMounted) return
+
     if (multiShot) {
       const timer = setTimeout(() => {
         setMultiShot(false)
       }, POWERUP_DURATION)
       return () => clearTimeout(timer)
     }
-  }, [multiShot])
+  }, [multiShot, isMounted])
 
   useEffect(() => {
+    if (!isMounted) return
+
     if (playerShield > 0) {
       const timer = setTimeout(() => {
         setPlayerShield(0)
       }, POWERUP_DURATION)
       return () => clearTimeout(timer)
     }
-  }, [playerShield])
+  }, [playerShield, isMounted])
 
   // Loop principal do jogo
   useEffect(() => {
-    if (!gameStarted || gamePaused || gameOver) return
+    if (!isMounted || !gameStarted || gamePaused || gameOver) return
+
+    let lastTime = 0
+    const targetFPS = isTouchDevice ? 30 : 60 // Lower FPS target for mobile
+    const frameInterval = 1000 / targetFPS
 
     const gameLoop = (timestamp: number) => {
       if (!lastTimeRef.current) {
         lastTimeRef.current = timestamp
+        lastTime = timestamp
       }
 
-      const deltaTime = timestamp - lastTimeRef.current
-      lastTimeRef.current = timestamp
+      const deltaTime = timestamp - lastTime
 
-      // Limpar o canvas
-      const canvas = canvasRef.current
-      if (!canvas) return
+      // Only update if enough time has passed (frame limiting)
+      if (deltaTime >= frameInterval) {
+        lastTime = timestamp - (deltaTime % frameInterval)
 
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
+        // Limpar o canvas
+        const canvas = canvasRef.current
+        if (!canvas) return
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
 
-      // Desenhar fundo
-      drawBackground(ctx)
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      // Desenhar jogador
-      drawPlayer(ctx)
+        // Desenhar fundo
+        drawBackground(ctx)
 
-      // Atualizar e desenhar balas
-      updateBullets()
-      drawBullets(ctx)
+        // Desenhar jogador
+        drawPlayer(ctx)
 
-      // Gerar inimigos
-      if (timestamp - lastEnemySpawnRef.current > ENEMY_SPAWN_RATE / (level * 0.5)) {
-        spawnEnemy()
-        lastEnemySpawnRef.current = timestamp
+        // Atualizar e desenhar balas
+        updateBullets()
+        drawBullets(ctx)
+
+        // Gerar inimigos - reduced spawn rate
+        const enemySpawnRate = ENEMY_SPAWN_RATE / (level * 0.4)
+        if (timestamp - lastEnemySpawnRef.current > enemySpawnRate) {
+          spawnEnemy()
+          lastEnemySpawnRef.current = timestamp
+        }
+
+        // Atualizar e desenhar inimigos
+        updateEnemies(deltaTime)
+        drawEnemies(ctx)
+
+        // Gerar powerups - reduced spawn rate
+        if (timestamp - lastPowerupSpawnRef.current > POWERUP_SPAWN_RATE * 1.5) {
+          spawnPowerup()
+          lastPowerupSpawnRef.current = timestamp
+        }
+
+        // Atualizar e desenhar powerups
+        updatePowerups(deltaTime)
+        drawPowerups(ctx)
+
+        // Verificar colisões
+        checkCollisions()
+
+        // Atualizar e desenhar partículas
+        updateParticles(deltaTime)
+        drawParticles(ctx)
+
+        // Desenhar UI
+        drawUI(ctx)
       }
-
-      // Atualizar e desenhar inimigos
-      updateEnemies(deltaTime)
-      drawEnemies(ctx)
-
-      // Gerar powerups
-      if (timestamp - lastPowerupSpawnRef.current > POWERUP_SPAWN_RATE) {
-        spawnPowerup()
-        lastPowerupSpawnRef.current = timestamp
-      }
-
-      // Atualizar e desenhar powerups
-      updatePowerups(deltaTime)
-      drawPowerups(ctx)
-
-      // Verificar colisões
-      checkCollisions()
-
-      // Atualizar e desenhar partículas
-      updateParticles(deltaTime)
-      drawParticles(ctx)
-
-      // Desenhar UI
-      drawUI(ctx)
 
       // Continuar o loop
       gameLoopRef.current = requestAnimationFrame(gameLoop)
@@ -302,6 +561,7 @@ export default function Home() {
       }
     }
   }, [
+    isMounted,
     gameStarted,
     gamePaused,
     gameOver,
@@ -325,29 +585,31 @@ export default function Home() {
     ctx.fillStyle = gradient
     ctx.fillRect(0, 0, gameWidth, gameHeight)
 
-    // Grade de fundo
+    // Grade de fundo - reduced number of lines
     ctx.strokeStyle = "rgba(147, 51, 234, 0.1)"
     ctx.lineWidth = 1
 
-    // Linhas horizontais
-    for (let y = 0; y < gameHeight; y += 40) {
+    // Linhas horizontais - increased spacing
+    const gridSpacing = isTouchDevice ? 80 : 60
+    for (let y = 0; y < gameHeight; y += gridSpacing) {
       ctx.beginPath()
       ctx.moveTo(0, y)
       ctx.lineTo(gameWidth, y)
       ctx.stroke()
     }
 
-    // Linhas verticais
-    for (let x = 0; x < gameWidth; x += 40) {
+    // Linhas verticais - increased spacing
+    for (let x = 0; x < gameWidth; x += gridSpacing) {
       ctx.beginPath()
       ctx.moveTo(x, 0)
       ctx.lineTo(x, gameHeight)
       ctx.stroke()
     }
 
-    // Estrelas
+    // Estrelas - reduced count
+    const starCount = isTouchDevice ? 30 : 50
     ctx.fillStyle = "rgba(255, 255, 255, 0.5)"
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < starCount; i++) {
       const x = Math.random() * gameWidth
       const y = Math.random() * gameHeight
       const size = Math.random() * 2
@@ -670,25 +932,31 @@ export default function Home() {
 
   // Funções de atualização
   const updateBullets = () => {
-    setBullets((prev) =>
-      prev
+    setBullets((prev) => {
+      // Process all bullets in a single update
+      const updatedBullets = prev
         .map((bullet) => ({
           ...bullet,
           y: bullet.y - bullet.speed,
         }))
-        .filter((bullet) => bullet.y + bullet.height > 0),
-    )
+        .filter((bullet) => bullet.y + bullet.height > 0)
+
+      return updatedBullets
+    })
   }
 
   const updateEnemies = (deltaTime: number) => {
-    setEnemies((prev) =>
-      prev
+    setEnemies((prev) => {
+      // Process all enemies in a single update
+      const updatedEnemies = prev
         .map((enemy) => ({
           ...enemy,
           y: enemy.y + enemy.speed * (deltaTime / 16),
         }))
-        .filter((enemy) => enemy.y < gameHeight),
-    )
+        .filter((enemy) => enemy.y < gameHeight + enemy.height)
+
+      return updatedEnemies
+    })
   }
 
   const updatePowerups = (deltaTime: number) => {
@@ -703,20 +971,27 @@ export default function Home() {
   }
 
   const updateParticles = (deltaTime: number) => {
-    setParticles((prev) =>
-      prev
+    setParticles((prev) => {
+      // Process all particles in a single update
+      const updatedParticles = prev
         .map((particle) => ({
           ...particle,
           x: particle.x + particle.speedX * (deltaTime / 16),
           y: particle.y + particle.speedY * (deltaTime / 16),
           life: particle.life - deltaTime / 16,
         }))
-        .filter((particle) => particle.life > 0),
-    )
+        .filter((particle) => particle.life > 0)
+
+      return updatedParticles
+    })
   }
 
   // Funções de geração
   const spawnEnemy = () => {
+    // Limit max enemies based on device
+    const maxEnemies = isTouchDevice ? 5 : 10
+    if (enemies.length >= maxEnemies) return
+
     const types: ("standard" | "fast" | "tank")[] = ["standard", "fast", "tank"]
     const weights = [0.6, 0.3, 0.1] // Probabilidades de cada tipo
 
@@ -748,7 +1023,7 @@ export default function Home() {
     // Configurar propriedades com base no tipo
     let width = 40
     let height = 40
-    let speed = 2 + level * 0.2
+    let speed = 1.5 + level * 0.15 // Reduced base speed
     let health = 1
 
     // Ajustar tamanho para dispositivos móveis
@@ -759,12 +1034,12 @@ export default function Home() {
     if (selectedType === "fast") {
       width = 30 * scaleFactor
       height = 30 * scaleFactor
-      speed = 3 + level * 0.3
+      speed = 2 + level * 0.2 // Reduced speed scaling
       health = 1
     } else if (selectedType === "tank") {
       width = 50 * scaleFactor
       height = 50 * scaleFactor
-      speed = 1 + level * 0.1
+      speed = 0.8 + level * 0.08 // Reduced speed scaling
       health = 3
     }
 
@@ -805,15 +1080,18 @@ export default function Home() {
     setPowerups((prev) => [...prev, newPowerup])
   }
 
+  // Optimize particle generation - reduce count and complexity
   const createParticles = (x: number, y: number, count: number, colors: string[]) => {
+    // Limit the number of particles based on device performance
+    const actualCount = Math.min(count, isTouchDevice ? 5 : 10)
     const newParticles: Particle[] = []
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < actualCount; i++) {
       const angle = Math.random() * Math.PI * 2
-      const speed = Math.random() * 3 + 1
-      const size = Math.random() * 4 + 1
+      const speed = Math.random() * 2 + 0.5 // Reduced speed
+      const size = Math.random() * 3 + 1 // Slightly smaller particles
       const color = colors[Math.floor(Math.random() * colors.length)]
-      const life = Math.random() * 30 + 20
+      const life = Math.random() * 20 + 10 // Shorter lifespan
 
       newParticles.push({
         id: Date.now() + Math.random(),
@@ -828,14 +1106,26 @@ export default function Home() {
       })
     }
 
-    setParticles((prev) => [...prev, ...newParticles])
+    // Use functional update to avoid race conditions
+    setParticles((prev) => {
+      // Limit total particles
+      const maxParticles = isTouchDevice ? 30 : 60
+      return [...newParticles, ...prev].slice(0, maxParticles)
+    })
   }
 
   // Funções de colisão
   const checkCollisions = () => {
-    // Colisão entre balas e inimigos
-    bullets.forEach((bullet) => {
-      enemies.forEach((enemy) => {
+    // Only check collisions for bullets that are in the visible area
+    const activeBullets = bullets.filter((bullet) => bullet.y > 0 && bullet.y < gameHeight)
+
+    // Only check collisions for enemies that are in the visible area
+    const activeEnemies = enemies.filter((enemy) => enemy.y > -enemy.height && enemy.y < gameHeight)
+
+    // Colisão entre balas e inimigos - optimized to reduce checks
+    activeBullets.forEach((bullet) => {
+      for (let i = 0; i < activeEnemies.length; i++) {
+        const enemy = activeEnemies[i]
         if (
           bullet.x < enemy.x + enemy.width &&
           bullet.x + bullet.width > enemy.x &&
@@ -860,8 +1150,8 @@ export default function Home() {
               .filter((e) => e.health > 0),
           )
 
-          // Criar partículas
-          createParticles(bullet.x + bullet.width / 2, bullet.y + bullet.height / 2, 10, [
+          // Criar partículas - reduced count
+          createParticles(bullet.x + bullet.width / 2, bullet.y + bullet.height / 2, 5, [
             enemy.color,
             "#ffffff",
             "#38bdf8",
@@ -872,23 +1162,28 @@ export default function Home() {
 
           // Efeito sonoro
           playSound("hit")
+
+          // Break early after collision is found
+          break
         }
-      })
+      }
     })
 
     // Colisão entre jogador e inimigos
-    enemies.forEach((enemy) => {
-      if (
-        playerX < enemy.x + enemy.width &&
-        playerX + PLAYER_WIDTH > enemy.x &&
-        playerY < enemy.y + enemy.height &&
-        playerY + PLAYER_HEIGHT > enemy.y
-      ) {
-        // Remover inimigo
-        setEnemies((prev) => prev.filter((e) => e.id !== enemy.id))
+    if (playerShield <= 0) {
+      // Only check if player doesn't have shield
+      for (let i = 0; i < activeEnemies.length; i++) {
+        const enemy = activeEnemies[i]
+        if (
+          playerX < enemy.x + enemy.width &&
+          playerX + PLAYER_WIDTH > enemy.x &&
+          playerY < enemy.y + enemy.height &&
+          playerY + PLAYER_HEIGHT > enemy.y
+        ) {
+          // Remover inimigo
+          setEnemies((prev) => prev.filter((e) => e.id !== enemy.id))
 
-        // Reduzir vida do jogador se não tiver escudo
-        if (playerShield <= 0) {
+          // Reduzir vida do jogador
           const damage = enemy.type === "standard" ? 10 : enemy.type === "fast" ? 15 : 25
           setPlayerHealth((prev) => {
             const newHealth = prev - damage
@@ -897,263 +1192,79 @@ export default function Home() {
             }
             return newHealth
           })
+
+          // Criar partículas - reduced count
+          createParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, 10, [
+            enemy.color,
+            "#ffffff",
+            "#ef4444",
+          ])
+
+          // Efeito sonoro
+          playSound("explosion")
+          break
         }
-
-        // Criar partículas
-        createParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, 20, [enemy.color, "#ffffff", "#ef4444"])
-
-        // Efeito sonoro
-        playSound("explosion")
       }
-    })
-
-    // Colisão entre jogador e powerups
-    powerups.forEach((powerup) => {
-      if (
-        playerX < powerup.x + powerup.width &&
-        playerX + PLAYER_WIDTH > powerup.x &&
-        playerY < powerup.y + powerup.height &&
-        playerY + PLAYER_HEIGHT > powerup.y
-      ) {
-        // Remover powerup
-        setPowerups((prev) => prev.filter((p) => p.id !== powerup.id))
-
-        // Aplicar efeito
-        if (powerup.type === "shield") {
-          setPlayerShield(100)
-        } else if (powerup.type === "rapidFire") {
-          setRapidFire(true)
-        } else if (powerup.type === "multiShot") {
-          setMultiShot(true)
-        }
-
-        // Criar partículas
-        const color = powerup.type === "shield" ? "#3b82f6" : powerup.type === "rapidFire" ? "#9333ea" : "#06b6d4"
-
-        createParticles(powerup.x + powerup.width / 2, powerup.y + powerup.height / 2, 15, [
-          color,
-          "#ffffff",
-          "#38bdf8",
-        ])
-
-        // Efeito sonoro
-        playSound("powerup")
-      }
-    })
-  }
-
-  // Adicionar esta função para lidar com eventos de toque
-  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!gameStarted || gamePaused || gameOver) return
-
-    const touch = e.touches[0]
-    setTouchStartX(touch.clientX)
-  }
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!gameStarted || gamePaused || gameOver || touchStartX === null) return
-
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const rect = canvas.getBoundingClientRect()
-    const touch = e.touches[0]
-    const touchX = touch.clientX
-
-    // Calcular a nova posição com base no movimento do toque
-    const newX = Math.max(0, Math.min(gameWidth - PLAYER_WIDTH, touchX - rect.left - PLAYER_WIDTH / 2))
-    setPlayerX(newX)
-  }
-
-  const handleTouchEnd = () => {
-    setTouchStartX(null)
-  }
-
-  // Adicionar esta função para lidar com tiros
-  const handleShoot = () => {
-    const now = Date.now()
-    const cooldown = rapidFire ? RAPID_FIRE_COOLDOWN : SHOOT_COOLDOWN
-
-    if (now - lastShootTimeRef.current < cooldown) return
-
-    lastShootTimeRef.current = now
-
-    if (multiShot) {
-      // Tiro triplo
-      const bulletOffsets = [-15, 0, 15]
-      const newBullets = bulletOffsets.map((offset) => ({
-        id: Date.now() + Math.random() + offset,
-        x: playerX + PLAYER_WIDTH / 2 - BULLET_WIDTH / 2 + offset,
-        y: playerY,
-        width: BULLET_WIDTH,
-        height: BULLET_HEIGHT,
-        speed: BULLET_SPEED,
-      }))
-
-      setBullets((prev) => [...prev, ...newBullets])
-    } else {
-      // Tiro único
-      const newBullet: Bullet = {
-        id: Date.now() + Math.random(),
-        x: playerX + PLAYER_WIDTH / 2 - BULLET_WIDTH / 2,
-        y: playerY,
-        width: BULLET_WIDTH,
-        height: BULLET_HEIGHT,
-        speed: BULLET_SPEED,
-      }
-
-      setBullets((prev) => [...prev, newBullet])
     }
 
-    // Efeito sonoro
-    playSound("shoot")
-  }
+    // Colisão entre jogador e powerups - only check if there are powerups
+    if (powerups.length > 0) {
+      for (let i = 0; i < powerups.length; i++) {
+        const powerup = powerups[i]
+        if (
+          playerX < powerup.x + powerup.width &&
+          playerX + PLAYER_WIDTH > powerup.x &&
+          playerY < powerup.y + powerup.height &&
+          playerY + PLAYER_HEIGHT > powerup.y
+        ) {
+          // Remover powerup
+          setPowerups((prev) => prev.filter((p) => p.id !== powerup.id))
 
-  // Funções de controle
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!gameStarted || gamePaused || gameOver) return
+          // Aplicar efeito
+          if (powerup.type === "shield") {
+            setPlayerShield(100)
+          } else if (powerup.type === "rapidFire") {
+            setRapidFire(true)
+          } else if (powerup.type === "multiShot") {
+            setMultiShot(true)
+          }
 
-    const canvas = canvasRef.current
-    if (!canvas) return
+          // Criar partículas - reduced count
+          const color = powerup.type === "shield" ? "#3b82f6" : powerup.type === "rapidFire" ? "#9333ea" : "#06b6d4"
+          createParticles(powerup.x + powerup.width / 2, powerup.y + powerup.height / 2, 8, [
+            color,
+            "#ffffff",
+            "#38bdf8",
+          ])
 
-    const rect = canvas.getBoundingClientRect()
-    const mouseX = e.clientX - rect.left
-
-    // Limitar movimento dentro do canvas
-    const newX = Math.max(0, Math.min(gameWidth - PLAYER_WIDTH, mouseX - PLAYER_WIDTH / 2))
-    setPlayerX(newX)
-  }
-
-  // Modificar a função handleClick para usar handleShoot
-  const handleClick = () => {
-    if (!gameStarted || gamePaused || gameOver) return
-    handleShoot()
-  }
-
-  // Funções de controle do jogo
-  const startGame = () => {
-    setGameStarted(true)
-    setGameOver(false)
-    setPlayerHealth(100)
-    setPlayerShield(0)
-    setRapidFire(false)
-    setMultiShot(false)
-    setScore(0)
-    setLevel(1)
-    setEnemies([])
-    setBullets([])
-    setPowerups([])
-    setParticles([])
-    lastTimeRef.current = 0
-    lastEnemySpawnRef.current = 0
-    lastPowerupSpawnRef.current = 0
-    lastShootTimeRef.current = 0
-
-    // Posicionar jogador
-    setPlayerX(gameWidth / 2 - PLAYER_WIDTH / 2)
-    setPlayerY(gameHeight - PLAYER_HEIGHT - 20)
-
-    // Efeito sonoro
-    playSound("start")
-  }
-
-  const pauseGame = () => {
-    setGamePaused(!gamePaused)
-  }
-
-  const endGame = () => {
-    setGameOver(true)
-    setGameStarted(false)
-
-    // Efeito sonoro
-    playSound("gameOver")
-  }
-
-  // Funções de áudio
-  const playSound = (type: "shoot" | "hit" | "explosion" | "powerup" | "start" | "gameOver" | "levelUp") => {
-    if (!soundEnabled) return
-
-    // Implementação básica de efeitos sonoros
-    // Em uma implementação real, você carregaria arquivos de áudio
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const oscillator = audioContext.createOscillator()
-    const gainNode = audioContext.createGain()
-
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
-
-    switch (type) {
-      case "shoot":
-        oscillator.type = "square"
-        oscillator.frequency.setValueAtTime(440, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.2)
-        break
-      case "hit":
-        oscillator.type = "sawtooth"
-        oscillator.frequency.setValueAtTime(200, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(50, audioContext.currentTime + 0.1)
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.1)
-        break
-      case "explosion":
-        oscillator.type = "sawtooth"
-        oscillator.frequency.setValueAtTime(100, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.5)
-        break
-      case "powerup":
-        oscillator.type = "sine"
-        oscillator.frequency.setValueAtTime(300, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.2)
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.3)
-        break
-      case "start":
-        oscillator.type = "sine"
-        oscillator.frequency.setValueAtTime(300, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.5)
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.6)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.6)
-        break
-      case "gameOver":
-        oscillator.type = "sawtooth"
-        oscillator.frequency.setValueAtTime(200, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(50, audioContext.currentTime + 1)
-        gainNode.gain.setValueAtTime(0.2, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 1)
-        break
-      case "levelUp":
-        oscillator.type = "sine"
-        oscillator.frequency.setValueAtTime(400, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(800, audioContext.currentTime + 0.2)
-        oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.4)
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4)
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.4)
-        break
+          // Efeito sonoro
+          playSound("powerup")
+          break
+        }
+      }
     }
   }
 
-  // Modificar a renderização da tela inicial para incluir a imagem de fundo
+  // Optimize the rocket animation on the home screen
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-purple-950 to-blue-950 text-white overflow-hidden">
-      <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-10 z-0"></div>
+      <div className="absolute inset-0 opacity-10 z-0">
+        <svg
+          className="w-full h-full"
+          xmlns="http://www.w3.org/2000/svg"
+          width="100%"
+          height="100%"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="currentColor" strokeWidth="0.5" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#grid)" />
+        </svg>
+      </div>
 
       {/* Cabeçalho */}
       <header className="w-full p-4 flex justify-between items-center relative z-10">
@@ -1193,67 +1304,103 @@ export default function Home() {
       <main className="flex-1 w-full max-w-5xl flex flex-col items-center justify-center relative z-10 p-4">
         {!gameStarted ? (
           <div className="w-full flex flex-col items-center relative">
-            {/* Foguete estático com efeito de movimento */}
+            {/* Foguete decolando com animação - simplified */}
             <div className="absolute w-full h-full overflow-hidden -z-5 pointer-events-none">
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                {/* Foguete estilizado */}
+              <motion.div
+                className="absolute top-1/2 left-1/2 -translate-x-1/2"
+                initial={{ y: 100 }}
+                animate={{
+                  y: [-50, -200, -350],
+                  transition: {
+                    duration: 8,
+                    repeat: Number.POSITIVE_INFINITY,
+                    repeatType: "loop",
+                    ease: "easeInOut",
+                  },
+                }}
+              >
+                {/* Foguete estilizado - simplified */}
                 <div className="relative w-40 h-64 md:w-48 md:h-80">
                   {/* Corpo do foguete */}
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-40 md:w-24 md:h-48 bg-gradient-to-b from-gray-100 to-gray-300 rounded-t-full"></div>
-                  
+
                   {/* Ponta do foguete */}
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-blue-400 to-purple-500 rounded-t-full"></div>
-                  
+
                   {/* Janela do foguete */}
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-cyan-300 to-blue-500 rounded-full border-2 border-gray-400"></div>
-                  
+
                   {/* Asas do foguete */}
                   <div className="absolute bottom-10 left-0 w-8 h-16 md:w-10 md:h-20 bg-gradient-to-r from-purple-500 to-purple-600 skew-y-[30deg] rounded-b-lg"></div>
                   <div className="absolute bottom-10 right-0 w-8 h-16 md:w-10 md:h-20 bg-gradient-to-l from-purple-500 to-purple-600 skew-y-[-30deg] rounded-b-lg"></div>
-                  
+
                   {/* Base do foguete */}
                   <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-8 md:w-28 md:h-10 bg-gradient-to-r from-gray-400 to-gray-600 rounded-b-lg"></div>
-                  
-                  {/* Efeito de propulsão animado */}
-                  <div className="absolute -bottom-16 left-1/2 -translate-x-1/2 w-16 h-32 md:w-20 md:h-40">
-                    <div className="w-full h-full bg-gradient-to-t from-orange-600 via-yellow-400 to-transparent rounded-b-full animate-pulse opacity-80"></div>
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-24 md:w-12 md:h-32 bg-gradient-to-t from-yellow-300 via-yellow-100 to-transparent rounded-b-full animate-pulse opacity-60"></div>
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 w-6 h-16 md:w-8 md:h-24 bg-gradient-to-t from-white via-yellow-50 to-transparent rounded-b-full animate-pulse opacity-40"></div>
-                  </div>
+
+                  {/* Efeito de propulsão animado - simplified */}
+                  <motion.div
+                    className="absolute -bottom-16 left-1/2 -translate-x-1/2 w-16 h-32 md:w-20 md:h-40"
+                    animate={{
+                      scaleY: [0.8, 1.2, 0.8],
+                      transition: {
+                        duration: 1.2,
+                        repeat: Number.POSITIVE_INFINITY,
+                        repeatType: "loop",
+                      },
+                    }}
+                  >
+                    <div className="w-full h-full bg-gradient-to-t from-orange-600 via-yellow-400 to-transparent rounded-b-full opacity-80"></div>
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-24 md:w-12 md:h-32 bg-gradient-to-t from-yellow-300 via-yellow-100 to-transparent rounded-b-full opacity-60"></div>
+                  </motion.div>
                 </div>
-                
-                {/* Partículas de propulsão */}
+
+                {/* Partículas de propulsão - reduced count */}
                 <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-40 h-40 md:w-48 md:h-48">
-                  {Array.from({ length: 20 }).map((_, i) => (
-                    <div 
+                  {Array.from({ length: isTouchDevice ? 8 : 12 }).map((_, i) => (
+                    <motion.div
                       key={i}
                       className="absolute rounded-full"
                       style={{
-                        width: Math.random() * 6 + 2 + 'px',
-                        height: Math.random() * 6 + 2 + 'px',
+                        width: Math.random() * 6 + 2 + "px",
+                        height: Math.random() * 6 + 2 + "px",
                         backgroundColor: `rgba(${255}, ${Math.floor(Math.random() * 200 + 55)}, ${Math.floor(Math.random() * 100)}, ${Math.random() * 0.7 + 0.3})`,
-                        left: `calc(50% + ${(Math.random() * 30 - 15)}px)`,
+                        left: `calc(50% + ${Math.random() * 30 - 15}px)`,
                         bottom: `${Math.random() * 40}px`,
-                        animation: `rocketParticle ${Math.random() * 2 + 1}s infinite ${Math.random() * 2}s`
+                      }}
+                      animate={{
+                        y: [0, 40],
+                        opacity: [1, 0],
+                        transition: {
+                          duration: Math.random() * 2 + 1,
+                          repeat: Number.POSITIVE_INFINITY,
+                          delay: Math.random() * 2,
+                        },
                       }}
                     />
                   ))}
                 </div>
-              </div>
-              
-              {/* Estrelas em movimento para dar sensação de movimento */}
+              </motion.div>
+
+              {/* Estrelas em movimento - reduced count */}
               <div className="absolute inset-0">
-                {Array.from({ length: 100 }).map((_, i) => (
-                  <div 
+                {Array.from({ length: isTouchDevice ? 30 : 50 }).map((_, i) => (
+                  <motion.div
                     key={i}
                     className="absolute rounded-full bg-white"
                     style={{
-                      width: Math.random() * 3 + 1 + 'px',
-                      height: Math.random() * 3 + 1 + 'px',
-                      top: Math.random() * 100 + '%',
-                      left: Math.random() * 100 + '%',
+                      width: Math.random() * 3 + 1 + "px",
+                      height: Math.random() * 3 + 1 + "px",
+                      top: Math.random() * 100 + "%",
+                      left: Math.random() * 100 + "%",
                       opacity: Math.random() * 0.7 + 0.3,
-                      animation: `starMovement ${Math.random() * 10 + 20}s linear infinite`
+                    }}
+                    animate={{
+                      y: [0, "100vh"],
+                      transition: {
+                        duration: Math.random() * 10 + 20,
+                        repeat: Number.POSITIVE_INFINITY,
+                        ease: "linear",
+                      },
                     }}
                   />
                 ))}
@@ -1265,10 +1412,10 @@ export default function Home() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8 }}
-              className="text-center mb-12"
+              className="text-center mb-12 mt-20"
             >
-              <h1 className={`${tiltNeon.className} text-5xl md:text-7xl font-bold mb-4 relative animate-pulse`}>
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-cyan-300 to-blue-400">
+              <h1 className={`${tiltNeon.className} text-5xl md:text-7xl font-bold mb-4 relative`}>
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-cyan-300 to-blue-400 animate-pulse">
                   CYBER SHOOTER
                 </span>
               </h1>
@@ -1394,35 +1541,17 @@ export default function Home() {
             {/* Canvas do jogo */}
             <canvas
               ref={canvasRef}
-              className="w-full h-full bg-gray-900/80 rounded-lg border border-purple-500/30 cursor-none"
+              className="w-full h-full bg-gray-900/80"
               onMouseMove={handleMouseMove}
               onClick={handleClick}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
-            />
-
-            {/* Controles para dispositivos móveis */}
-            {isTouchDevice && !gamePaused && !gameOver && (
-              <div className="absolute bottom-4 right-4 z-20">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="w-12 h-12 rounded-full bg-purple-500/50 border-purple-400"
-                  onClick={handleShoot}
-                >
-                  <Zap className="h-6 w-6 text-white" />
-                </Button>
-              </div>
-            )}
+            ></canvas>
           </div>
         )}
       </main>
-
-      {/* Rodapé */}
-      <footer className="w-full p-4 text-center text-gray-400 text-sm relative z-10">
-        <p>Cyber Shooter - Um jogo de nave espacial cyberpunk - Desenvolvido por: Bianca Alves</p>
-      </footer>
     </div>
   )
 }
+
